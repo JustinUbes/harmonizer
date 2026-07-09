@@ -3,3 +3,5 @@ Current state: Audio does not play from where seeker is, scrubbing should be rea
 
 Ideal state: Audio plays where seeker is in real time, scrubbing can pause audio but wherever seeker is released is where audio will play. Recorded audio is either of the harmony itself or of the harmony along with the original melody, possibly interactive differing intervals after recording for compare.
 
+GitHub
+Add necessary dependabot and security flows since this repo has managed dependencies.
