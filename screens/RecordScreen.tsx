@@ -4,25 +4,22 @@ import { Audio } from 'expo-av';
 import { useDispatch } from 'react-redux';
 import { addRec } from '../store/redux/recordings';
 import { getCurrentDate } from '../utils/CurrentDate';
+import {
+  DEFAULT_HARMONY_INTERVAL,
+  HARMONY_INTERVALS,
+  HarmonyInterval,
+} from '../utils/HarmonyIntervals';
 import styles from '../styles';
 import AppButton from '../components/AppButton';
 import { formatTime } from '../utils/FormatTime';
-
-const HARMONY_INTERVALS = [
-  { label: 'Minor 3rd', semitones: 3 },
-  { label: 'Major 3rd', semitones: 4 },
-  { label: 'Perfect 5th', semitones: 7 },
-  { label: 'Octave', semitones: 12 },
-] as const;
-
-type HarmonyInterval = (typeof HARMONY_INTERVALS)[number];
 
 function RecordScreen() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [permissionResponse, requestPermission] = Audio.usePermissions();
   const [isRecording, setIsRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [selectedInterval, setSelectedInterval] = useState<HarmonyInterval>(HARMONY_INTERVALS[1]);
+  const [selectedInterval, setSelectedInterval] =
+    useState<HarmonyInterval>(DEFAULT_HARMONY_INTERVAL);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dispatch = useDispatch();
 
