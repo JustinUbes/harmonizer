@@ -86,7 +86,9 @@ describe('RecordScreen', () => {
   });
 
   afterEach(() => {
-    jest.runOnlyPendingTimers();
+    act(() => {
+      jest.clearAllTimers();
+    });
     jest.useRealTimers();
   });
 
@@ -159,7 +161,9 @@ describe('RecordScreen', () => {
     fireEvent.press(startButton);
     fireEvent.press(startButton);
 
-    expect(mockCreateAsync).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mockCreateAsync).toHaveBeenCalledTimes(1);
+    });
 
     await act(async () => {
       startDeferred.resolve({ recording: createMockRecording() });
@@ -188,8 +192,10 @@ describe('RecordScreen', () => {
     fireEvent.press(stopButton);
     fireEvent.press(stopButton);
 
-    expect(mockRecording.getStatusAsync).toHaveBeenCalledTimes(1);
-    expect(mockRecording.stopAndUnloadAsync).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mockRecording.getStatusAsync).toHaveBeenCalledTimes(1);
+      expect(mockRecording.stopAndUnloadAsync).toHaveBeenCalledTimes(1);
+    });
 
     await act(async () => {
       stopDeferred.resolve();
