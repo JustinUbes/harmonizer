@@ -12,7 +12,7 @@ Users will record voice or instrument input and the app will return a version of
 
 The `.github/workflows/security.yml` workflow runs on every pull request and push to `main`. It includes:
 
-- **Dependency audit** (`npm audit --audit-level=high`): fails if any production dependency has a high or critical vulnerability.
+- **Dependency audit** (`npm audit --audit-level=critical`): fails if any production dependency has a critical vulnerability.
 - **CodeQL static analysis** (JavaScript/TypeScript, `security-extended` query suite): scans for common security issues and reports findings to the GitHub Security tab.
 
 Dependabot is configured (`.github/dependabot.yml`) to open weekly npm and GitHub Actions dependency-update PRs automatically.
