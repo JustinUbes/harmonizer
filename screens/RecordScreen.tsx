@@ -58,7 +58,7 @@ function RecordScreen() {
       const permission =
         permissionResponse?.status === 'granted' ? permissionResponse : await requestPermission();
 
-      if (permission.status !== 'granted') {
+      if (!permission || permission.status !== 'granted') {
         return;
       }
 
