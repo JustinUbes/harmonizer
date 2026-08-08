@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity } from 'react-native';
 import { Audio } from 'expo-av';
 import { useDispatch } from 'react-redux';
@@ -17,11 +17,21 @@ function RecordScreen() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [permissionResponse, requestPermission] = Audio.usePermissions();
   const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [selectedInterval, setSelectedInterval] =
     useState<HarmonyInterval>(DEFAULT_HARMONY_INTERVAL);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingActionInFlightRef = useRef(false);
   const dispatch = useDispatch();
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, []);
 
   function startTimer() {
     if (timerRef.current === null) {
@@ -40,10 +50,18 @@ function RecordScreen() {
   }
 
   async function startRecording() {
+    if (recordingActionInFlightRef.current) return;
+    recordingActionInFlightRef.current = true;
+    setIsProcessing(true);
+
     try {
-      if (permissionResponse?.status !== 'granted') {
-        await requestPermission();
+      const permission =
+        permissionResponse?.status === 'granted' ? permissionResponse : await requestPermission();
+
+      if (!permission || permission.status !== 'granted') {
+        return;
       }
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -59,12 +77,17 @@ function RecordScreen() {
       console.error('Failed to start recording:', err);
       setRecording(null);
       setIsRecording(false);
+    } finally {
+      recordingActionInFlightRef.current = false;
+      setIsProcessing(false);
     }
   }
 
   async function stopRecording() {
-    if (!recording) return;
+    if (!recording || recordingActionInFlightRef.current) return;
+    recordingActionInFlightRef.current = true;
     setIsRecording(false);
+    setIsProcessing(true);
     try {
       const status = await recording.getStatusAsync();
       await recording.stopAndUnloadAsync();
@@ -86,6 +109,8 @@ function RecordScreen() {
       console.error('Failed to stop recording:', err);
     } finally {
       setRecording(null);
+      recordingActionInFlightRef.current = false;
+      setIsProcessing(false);
     }
   }
 
@@ -106,7 +131,7 @@ function RecordScreen() {
                 selectedInterval.label === interval.label && styles.intervalButtonActive,
               ]}
               onPress={() => setSelectedInterval(interval)}
-              disabled={isRecording}
+              disabled={isRecording || isProcessing}
               accessibilityRole="radio"
               accessibilityState={{ selected: selectedInterval.label === interval.label }}
             >
@@ -126,6 +151,8 @@ function RecordScreen() {
       <AppButton
         title={isRecording ? 'Stop Recording' : 'Start Recording'}
         onPress={isRecording ? stopRecording : startRecording}
+        disabled={isProcessing}
+        loading={isProcessing}
       />
     </View>
   );
