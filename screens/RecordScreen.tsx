@@ -59,8 +59,6 @@ function RecordScreen() {
         permissionResponse?.status === 'granted' ? permissionResponse : await requestPermission();
 
       if (permission.status !== 'granted') {
-        setRecording(null);
-        setIsRecording(false);
         return;
       }
 

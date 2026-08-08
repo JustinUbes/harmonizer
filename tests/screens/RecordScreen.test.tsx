@@ -93,7 +93,7 @@ describe('RecordScreen', () => {
   });
 
   it('requests permission and does not start recording when permission is denied', async () => {
-    permissionResponse = { status: 'denied' };
+    permissionResponse.status = 'denied';
     requestPermissionMock.mockResolvedValue({ status: 'denied' });
 
     const screen = render(<RecordScreen />);
