@@ -91,6 +91,7 @@ export function generateWavBuffer(
   //   4  'data'
   //   4  subchunk2Size (= pcmDataSize)
   //   N  PCM samples
+  // 44-byte header: 12 (RIFF) + 24 (fmt) + 8 (data header)
   const headerSize = 44;
   const totalSize = headerSize + pcmDataSize;
   const buf = Buffer.alloc(totalSize);
@@ -99,7 +100,7 @@ export function generateWavBuffer(
 
   // RIFF chunk descriptor
   buf.write('RIFF', offset, 'ascii'); offset += 4;
-  buf.writeUInt32LE(36 + pcmDataSize, offset); offset += 4; // file size − 8
+  buf.writeUInt32LE(headerSize - 8 + pcmDataSize, offset); offset += 4; // file size − 8
   buf.write('WAVE', offset, 'ascii'); offset += 4;
 
   // fmt sub-chunk
