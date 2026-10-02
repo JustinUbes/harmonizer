@@ -13,6 +13,21 @@ import styles from '../styles';
 import AppButton from '../components/AppButton';
 import { formatTime } from '../utils/FormatTime';
 
+// iOS records 16-bit PCM WAV so harmonies can be rendered on-device.
+// Android's MediaRecorder cannot produce PCM, so it keeps the AAC preset.
+const RECORDING_OPTIONS: Audio.RecordingOptions = {
+  ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+  ios: {
+    ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+    extension: '.wav',
+    outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+    numberOfChannels: 1,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+};
+
 function RecordScreen() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [permissionResponse, requestPermission] = Audio.usePermissions();
@@ -67,9 +82,7 @@ function RecordScreen() {
         playsInSilentModeIOS: true,
       });
 
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const { recording: newRecording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
       setRecording(newRecording);
       setIsRecording(true);
       startTimer();
@@ -102,6 +115,7 @@ function RecordScreen() {
             date: getCurrentDate(),
             duration: status.durationMillis ?? elapsedMs,
             title: '',
+            harmonySemitones: selectedInterval.semitones,
           })
         );
       }

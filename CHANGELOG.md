@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Migrate the app to TypeScript with strict typing across the codebase
 - Add harmony interval selection, recording title editing, sharing, and empty-state UI
 - Add Jest coverage for formatting helpers and Redux recording behavior
+- Add harmony-aware playback with Melody, Melody + Harmony, and Harmony Only modes; harmonies are rendered on-device from the interval chosen when recording (iOS records PCM WAV for this; older and Android AAC recordings fall back to the melody)
 
 ### Changed
 - Upgrade the project to Expo SDK 54 and refresh the native dependency set
@@ -18,3 +19,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Correct time formatting and current-date formatting helpers
 - Fix playback state tracking, delete handling, and the drawer header title styling
+- Make seeking and scrubbing reliable: playback starts exactly from the seeker, the position follows the thumb while dragging, audio pauses during a drag and resumes from the release point, and play/pause stays responsive around seeks
+- Delete recordings with the expo-file-system `File` API so audio files (and cached harmony renders) are actually removed
