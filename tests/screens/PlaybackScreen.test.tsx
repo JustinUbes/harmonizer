@@ -248,6 +248,42 @@ describe('PlaybackScreen', () => {
     expect(mockCreateAsync).toHaveBeenCalledTimes(1);
   });
 
+  it('starts playback on release when a queued play was skipped during the drag', async () => {
+    const otherRecording: Recording = { ...melodyRecording, uri: 'file:///recordings/take-2.wav' };
+    mockRecordings = [melodyRecording, otherRecording];
+    let finishFirstRender!: (uri: string) => void;
+    mockResolvePlaybackUri.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          finishFirstRender = resolve;
+        })
+    );
+
+    const screen = render(<PlaybackScreen />);
+    const [firstPlay, secondPlay] = screen.getAllByRole('button', { name: 'Play' });
+    fireEvent.press(firstPlay);
+    await waitFor(() => expect(mockResolvePlaybackUri).toHaveBeenCalledTimes(1));
+
+    fireEvent.press(secondPlay);
+    const secondSlider = screen.getAllByLabelText('Playback position')[1];
+    fireEvent(secondSlider, 'slidingStart', 0);
+
+    await act(async () => {
+      finishFirstRender(`${melodyRecording.uri}#mix`);
+    });
+    fireEvent(secondSlider, 'slidingComplete', 4000);
+
+    await waitFor(() => {
+      expect(latestSound().playFromPositionAsync).toHaveBeenCalledWith(4000, EXACT_SEEK);
+    });
+    expect(mockCreateAsync).toHaveBeenCalledTimes(1);
+    expect(mockCreateAsync).toHaveBeenCalledWith(
+      { uri: `${otherRecording.uri}#mix` },
+      expect.objectContaining({ positionMillis: 4000 }),
+      expect.any(Function)
+    );
+  });
+
   it('resets to the start when playback finishes and replays from zero', async () => {
     const screen = render(<PlaybackScreen />);
     fireEvent.press(screen.getByRole('button', { name: 'Play' }));

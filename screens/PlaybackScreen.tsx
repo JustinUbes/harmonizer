@@ -217,8 +217,14 @@ function PlaybackScreen() {
     enqueue(async () => {
       try {
         const loaded = loadedRef.current;
-        // Not loaded yet: the cued position is used when playback starts.
-        if (!loaded || loaded.uri !== recording.uri) return;
+        if (!loaded || loaded.uri !== recording.uri) {
+          // Not loaded yet: the cued position is used when playback starts. A queued
+          // start may have been skipped while dragging, so start it now if still wanted.
+          if (wantsPlaybackRef.current && activeUriRef.current === recording.uri) {
+            await startPlayback(recording);
+          }
+          return;
+        }
         if (wantsPlaybackRef.current) {
           await loaded.sound.playFromPositionAsync(positionRef.current, EXACT_SEEK);
         } else {
