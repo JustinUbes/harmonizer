@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Migrate the app to TypeScript with strict typing across the codebase
 - Add harmony interval selection, recording title editing, sharing, and empty-state UI
 - Add Jest coverage for formatting helpers and Redux recording behavior
+- Add a Maestro E2E smoke flow (`npm run e2e:android`) that records from a fixture-fed emulator mic and verifies the new history entry
 
 ### Changed
 - Upgrade the project to Expo SDK 54 and refresh the native dependency set
