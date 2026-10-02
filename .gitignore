@@ -8,6 +8,13 @@ node_modules/
 dist/
 web-build/
 
+# generated native folders (npx expo prebuild / run:android)
+/android
+/ios
+
+# Maestro test output
+.maestro/screenshots/
+
 # Native
 *.orig.*
 *.jks

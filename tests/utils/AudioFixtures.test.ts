@@ -284,3 +284,18 @@ describe('FIXTURE_FREQS', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Committed E2E mic fixture (played into the emulator mic by Maestro runs)
+// ---------------------------------------------------------------------------
+
+describe('tests/fixtures/mic-input-a4.wav', () => {
+  it('matches generateWavBuffer(A4, 2 s, 16 kHz) byte-for-byte', () => {
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const committed = fs.readFileSync(path.join(__dirname, '../fixtures/mic-input-a4.wav'));
+    const expected = generateWavBuffer(FIXTURE_FREQS.A4, 2, 16000);
+
+    expect(committed.equals(Uint8Array.from(expected))).toBe(true);
+  });
+});

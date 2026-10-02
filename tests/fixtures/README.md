@@ -40,3 +40,17 @@ duration, sample rate) easy to verify directly in tests without relying on a ref
 3. Write a test in `tests/utils/AudioFixtures.test.ts` that verifies its properties.
 
 Do **not** commit raw binary `.wav` files — generate them with `generateWavBuffer` at test time.
+The one exception is the E2E mic fixture below.
+
+## E2E mic fixture: `mic-input-a4.wav`
+
+The Maestro smoke flow (`npm run e2e:android`, see the root README) plays this file into the
+Android emulator's virtual microphone, so it has to exist on disk. It is `generateWavBuffer(A4, 2, 16000)`:
+a 2-second, 16 kHz, 16-bit mono 440 Hz sine (≈64 KB) that loops seamlessly (exactly 880 cycles).
+`tests/utils/AudioFixtures.test.ts` asserts the committed bytes still match the generator.
+
+To regenerate it (Node 22.18+ / 24, which can import `.ts` directly):
+
+```sh
+node -e "import('./utils/AudioFixtures.ts').then((m) => require('fs').writeFileSync('tests/fixtures/mic-input-a4.wav', m.generateWavBuffer(m.FIXTURE_FREQS.A4, 2, 16000)))"
+```
