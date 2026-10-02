@@ -5,6 +5,8 @@ export interface Recording {
   date: string;
   duration: number;
   title: string;
+  /** Harmony interval chosen when recording; absent for recordings made before it was stored. */
+  harmonySemitones?: number;
 }
 
 interface RecordingsState {

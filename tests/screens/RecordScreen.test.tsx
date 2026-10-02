@@ -31,7 +31,15 @@ jest.mock('expo-av', () => ({
       createAsync: (...args: unknown[]) => mockCreateAsync(...args),
     },
     RecordingOptionsPresets: {
-      HIGH_QUALITY: 'HIGH_QUALITY',
+      HIGH_QUALITY: {
+        isMeteringEnabled: true,
+        android: { extension: '.m4a' },
+        ios: { extension: '.m4a', outputFormat: 'aac ' },
+        web: {},
+      },
+    },
+    IOSOutputFormat: {
+      LINEARPCM: 'lpcm',
     },
   },
 }));
@@ -117,7 +125,17 @@ describe('RecordScreen', () => {
     fireEvent.press(screen.getByRole('button', { name: 'Start Recording' }));
 
     await waitFor(() => {
-      expect(mockCreateAsync).toHaveBeenCalledWith('HIGH_QUALITY');
+      expect(mockCreateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          android: { extension: '.m4a' },
+          ios: expect.objectContaining({
+            extension: '.wav',
+            outputFormat: 'lpcm',
+            numberOfChannels: 1,
+            linearPCMBitDepth: 16,
+          }),
+        })
+      );
     });
 
     act(() => {
@@ -138,6 +156,7 @@ describe('RecordScreen', () => {
         date: 'Aug 8, 2026, 6:38 PM',
         duration: 2500,
         title: '',
+        harmonySemitones: 4,
       })
     );
     expect(mockSetAudioModeAsync).toHaveBeenNthCalledWith(1, {
@@ -204,6 +223,23 @@ describe('RecordScreen', () => {
 
     await waitFor(() => {
       expect(mockDispatch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('saves the selected harmony interval with the recording', async () => {
+    const screen = render(<RecordScreen />);
+
+    fireEvent.press(screen.getByRole('radio', { name: 'Perfect 5th' }));
+    fireEvent.press(screen.getByRole('button', { name: 'Start Recording' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop Recording' })).toBeTruthy();
+    });
+    fireEvent.press(screen.getByRole('button', { name: 'Stop Recording' }));
+
+    await waitFor(() => {
+      expect(mockDispatch).toHaveBeenCalledWith(
+        addRec(expect.objectContaining({ harmonySemitones: 7 }))
+      );
     });
   });
 });
