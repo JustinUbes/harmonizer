@@ -16,6 +16,8 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "react"
         update-types: ["version-update:semver-major"]
+      # react-test-renderer must match the React version pinned by the Expo SDK; bump it manually with react
+      - dependency-name: "react-test-renderer"
   - package-ecosystem: github-actions
     directory: /
     schedule:
