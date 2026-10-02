@@ -27,8 +27,8 @@ require() {
 
 cleanup() {
   if [[ -n "$PLAYER_PID" ]]; then
-    pkill -P "$PLAYER_PID" 2>/dev/null || true
-    kill "$PLAYER_PID" 2>/dev/null || true
+    # The player loop runs in its own process group; stop the loop and paplay together.
+    kill -- "-$PLAYER_PID" 2>/dev/null || true
   fi
   if [[ -n "$PREVIOUS_SOURCE" ]]; then
     pactl set-default-source "$PREVIOUS_SOURCE" 2>/dev/null || true
@@ -61,11 +61,8 @@ elif command -v pactl >/dev/null 2>&1 && command -v paplay >/dev/null 2>&1; then
   MODULE_ID="$(pactl load-module module-null-sink \
     sink_name="$SINK_NAME" sink_properties=device.description=HarmonizerE2EMic)"
   pactl set-default-source "$SINK_NAME.monitor"
-  (
-    while true; do
-      paplay --device="$SINK_NAME" "$FIXTURE"
-    done
-  ) &
+  # shellcheck disable=SC2016 # $1/$2 expand inside the child shell.
+  setsid bash -c 'while true; do paplay --device="$1" "$2"; done' _ "$SINK_NAME" "$FIXTURE" &
   PLAYER_PID=$!
   echo "Looping $FIXTURE into virtual mic '$SINK_NAME.monitor'."
 else
