@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, FlatList, Text, Image, TouchableOpacity } from 'react-native';
 import { Audio, AVPlaybackStatus } from 'expo-av';
+import { createAudioPlayer, AudioPlayer } from 'expo-audio';
 import * as Sharing from 'expo-sharing';
 import { useDispatch, useSelector } from 'react-redux';
 import { delRec } from '../store/redux/recordings';
@@ -16,9 +17,107 @@ const PROGRESS_UPDATE_INTERVAL_MS = 100;
 const EXACT_SEEK = { toleranceMillisBefore: 0, toleranceMillisAfter: 0 };
 
 interface LoadedSound {
-  sound: Audio.Sound;
+  sound: PlaybackController;
   uri: string;
   mode: PlaybackMode;
+}
+
+interface PlaybackController {
+  playFromPositionAsync: (positionMillis: number, seek: typeof EXACT_SEEK) => Promise<AVPlaybackStatus>;
+  pauseAsync: () => Promise<AVPlaybackStatus>;
+  setPositionAsync: (positionMillis: number, seek: typeof EXACT_SEEK) => Promise<AVPlaybackStatus>;
+  getStatusAsync: () => Promise<AVPlaybackStatus>;
+  unloadAsync: () => Promise<void>;
+}
+
+function isLoadForSoundUnavailableError(err: unknown): boolean {
+  const message =
+    typeof err === 'string'
+      ? err
+      : err && typeof err === 'object' && 'message' in err
+        ? String((err as { message?: unknown }).message)
+        : String(err);
+  return /loadForSound|expo-av native method/i.test(message);
+}
+
+function toPlaybackStatus(player: AudioPlayer, didJustFinish = false): AVPlaybackStatus {
+  return {
+    isLoaded: player.isLoaded,
+    isPlaying: player.playing,
+    didJustFinish,
+    positionMillis: Math.round(Math.max(0, player.currentTime || 0) * 1000),
+    durationMillis: Math.round(Math.max(0, player.duration || 0) * 1000),
+    androidImplementation: 'MediaPlayer',
+    shouldPlay: player.playing,
+    isBuffering: player.isBuffering,
+    rate: player.playbackRate,
+    shouldCorrectPitch: player.shouldCorrectPitch,
+    volume: player.volume,
+    isMuted: player.muted,
+    isLooping: player.loop,
+    playableDurationMillis: null,
+    uri: null,
+  } as AVPlaybackStatus;
+}
+
+function createExpoAudioController(
+  sourceUri: string,
+  onStatus: (status: AVPlaybackStatus) => void
+): PlaybackController {
+  const player = createAudioPlayer({ uri: sourceUri }, {
+    updateInterval: PROGRESS_UPDATE_INTERVAL_MS,
+  });
+
+  const subscription = player.addListener('playbackStatusUpdate', (status) => {
+    onStatus({
+      isLoaded: status.isLoaded,
+      isPlaying: status.playing,
+      didJustFinish: status.didJustFinish,
+      positionMillis: Math.round(Math.max(0, status.currentTime || 0) * 1000),
+      durationMillis: Math.round(Math.max(0, status.duration || 0) * 1000),
+      androidImplementation: 'MediaPlayer',
+      shouldPlay: status.playing,
+      isBuffering: status.isBuffering,
+      rate: status.playbackRate,
+      shouldCorrectPitch: status.shouldCorrectPitch,
+      volume: player.volume,
+      isMuted: player.muted,
+      isLooping: player.loop,
+      playableDurationMillis: null,
+      uri: null,
+    } as AVPlaybackStatus);
+  });
+
+  return {
+    async playFromPositionAsync(positionMillis, seek) {
+      await player.seekTo(
+        positionMillis / 1000,
+        seek.toleranceMillisBefore,
+        seek.toleranceMillisAfter
+      );
+      player.play();
+      return toPlaybackStatus(player);
+    },
+    async pauseAsync() {
+      player.pause();
+      return toPlaybackStatus(player);
+    },
+    async setPositionAsync(positionMillis, seek) {
+      await player.seekTo(
+        positionMillis / 1000,
+        seek.toleranceMillisBefore,
+        seek.toleranceMillisAfter
+      );
+      return toPlaybackStatus(player);
+    },
+    async getStatusAsync() {
+      return toPlaybackStatus(player);
+    },
+    async unloadAsync() {
+      subscription.remove();
+      player.remove();
+    },
+  };
 }
 
 function harmonyCaption(recording: Recording, mode: PlaybackMode): string | undefined {
@@ -104,7 +203,7 @@ function PlaybackScreen() {
     }
   }
 
-  async function ensureLoaded(recording: Recording): Promise<Audio.Sound | null> {
+  async function ensureLoaded(recording: Recording): Promise<PlaybackController | null> {
     const mode = modeRef.current;
     const loaded = loadedRef.current;
     if (loaded && loaded.uri === recording.uri && loaded.mode === mode) {
@@ -123,15 +222,25 @@ function PlaybackScreen() {
       }
       if (token !== loadTokenRef.current || activeUriRef.current !== recording.uri) return null;
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: sourceUri },
-        {
-          shouldPlay: false,
-          positionMillis: positionRef.current,
-          progressUpdateIntervalMillis: PROGRESS_UPDATE_INTERVAL_MS,
-        },
-        (status) => handlePlaybackStatus(token, status)
-      );
+      let sound: PlaybackController;
+      try {
+        const loaded = await Audio.Sound.createAsync(
+          { uri: sourceUri },
+          {
+            shouldPlay: false,
+            positionMillis: positionRef.current,
+            progressUpdateIntervalMillis: PROGRESS_UPDATE_INTERVAL_MS,
+          },
+          (status) => handlePlaybackStatus(token, status)
+        );
+        sound = loaded.sound as unknown as PlaybackController;
+      } catch (err) {
+        if (!isLoadForSoundUnavailableError(err)) {
+          throw err;
+        }
+        console.warn('expo-av Sound unavailable, using expo-audio playback fallback');
+        sound = createExpoAudioController(sourceUri, (status) => handlePlaybackStatus(token, status));
+      }
       if (token !== loadTokenRef.current) {
         await sound.unloadAsync().catch(() => null);
         return null;

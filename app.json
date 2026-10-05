@@ -4,6 +4,7 @@
     "slug": "harmonizer",
     "version": "1.0.0",
     "sdkVersion": "57.0.0",
+    "newArchEnabled": true,
     "orientation": "portrait",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "dark",
@@ -51,7 +52,9 @@
         }
       ],
       "expo-sharing",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-audio",
+      "expo-asset"
     ],
     "extra": {
       "eas": {

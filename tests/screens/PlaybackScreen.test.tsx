@@ -35,12 +35,17 @@ jest.mock('react-redux', () => ({
 type StatusCallback = (status: Record<string, unknown>) => void;
 
 const mockCreateAsync = jest.fn();
+const mockCreateAudioPlayer = jest.fn();
 jest.mock('expo-av', () => ({
   Audio: {
     Sound: {
       createAsync: (...args: unknown[]) => mockCreateAsync(...args),
     },
   },
+}));
+
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: (...args: unknown[]) => mockCreateAudioPlayer(...args),
 }));
 
 interface MockSound {

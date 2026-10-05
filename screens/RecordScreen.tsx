@@ -1,6 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity } from 'react-native';
-import { Audio } from 'expo-av';
+import {
+  IOSOutputFormat,
+  RecordingPresets,
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync as setExpoAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
 import { useDispatch } from 'react-redux';
 import { addRec } from '../store/redux/recordings';
 import { getCurrentDate } from '../utils/CurrentDate';
@@ -13,26 +20,13 @@ import styles from '../styles';
 import AppButton from '../components/AppButton';
 import { formatTime } from '../utils/FormatTime';
 
-const IOS_LINEAR_PCM_FORMAT = (Audio as unknown as { IOSOutputFormat?: { LINEARPCM?: string } })
-  .IOSOutputFormat?.LINEARPCM;
-
-const HIGH_QUALITY_PRESET: Audio.RecordingOptions =
-  typeof Audio.RecordingOptionsPresets.HIGH_QUALITY === 'object' &&
-  Audio.RecordingOptionsPresets.HIGH_QUALITY !== null
-    ? (Audio.RecordingOptionsPresets.HIGH_QUALITY as Audio.RecordingOptions)
-    : ({} as Audio.RecordingOptions);
-
-const HIGH_QUALITY_IOS_PRESET = HIGH_QUALITY_PRESET.ios ?? {};
-
-// iOS records 16-bit PCM WAV so harmonies can be rendered on-device.
-// Android's MediaRecorder cannot produce PCM, so it keeps the AAC preset.
-const RECORDING_OPTIONS: Audio.RecordingOptions = {
-  ...HIGH_QUALITY_PRESET,
+const EXPO_AUDIO_RECORDING_OPTIONS = {
+  ...RecordingPresets.HIGH_QUALITY,
+  extension: '.wav',
+  numberOfChannels: 1,
   ios: {
-    ...HIGH_QUALITY_IOS_PRESET,
-    extension: '.wav',
-    outputFormat: IOS_LINEAR_PCM_FORMAT ?? HIGH_QUALITY_IOS_PRESET.outputFormat,
-    numberOfChannels: 1,
+    ...RecordingPresets.HIGH_QUALITY.ios,
+    outputFormat: IOSOutputFormat.LINEARPCM,
     linearPCMBitDepth: 16,
     linearPCMIsBigEndian: false,
     linearPCMIsFloat: false,
@@ -40,8 +34,6 @@ const RECORDING_OPTIONS: Audio.RecordingOptions = {
 };
 
 function RecordScreen() {
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [permissionResponse, requestPermission] = Audio.usePermissions();
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -49,6 +41,7 @@ function RecordScreen() {
     useState<HarmonyInterval>(DEFAULT_HARMONY_INTERVAL);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingActionInFlightRef = useRef(false);
+  const expoAudioRecorder = useAudioRecorder(EXPO_AUDIO_RECORDING_OPTIONS);
   const dispatch = useDispatch();
 
   useEffect(() => {
@@ -81,25 +74,26 @@ function RecordScreen() {
     setIsProcessing(true);
 
     try {
-      const permission =
-        permissionResponse?.status === 'granted' ? permissionResponse : await requestPermission();
-
-      if (!permission || permission.status !== 'granted') {
-        return;
+      let permission = await getRecordingPermissionsAsync();
+      if (!permission.granted) {
+        permission = await requestRecordingPermissionsAsync();
+        if (!permission.granted) {
+          return;
+        }
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
 
-      const { recording: newRecording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
-      setRecording(newRecording);
+      await setExpoAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+      await expoAudioRecorder.prepareToRecordAsync(EXPO_AUDIO_RECORDING_OPTIONS);
+      expoAudioRecorder.record();
+
       setIsRecording(true);
       startTimer();
     } catch (err) {
       console.error('Failed to start recording:', err);
-      setRecording(null);
       setIsRecording(false);
     } finally {
       recordingActionInFlightRef.current = false;
@@ -108,23 +102,26 @@ function RecordScreen() {
   }
 
   async function stopRecording() {
-    if (!recording || recordingActionInFlightRef.current) return;
+    if (recordingActionInFlightRef.current || !isRecording) return;
     recordingActionInFlightRef.current = true;
     setIsRecording(false);
     setIsProcessing(true);
+
     try {
-      const status = await recording.getStatusAsync();
-      await recording.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      await expoAudioRecorder.stop();
+      await setExpoAudioModeAsync({ allowsRecording: false });
+      const recorderState = expoAudioRecorder.getStatus();
+      const savedUri = expoAudioRecorder.uri;
+      const savedDuration = recorderState.durationMillis ?? elapsedMs;
+
       resetTimer();
 
-      const uri = recording.getURI();
-      if (uri) {
+      if (savedUri) {
         dispatch(
           addRec({
-            uri,
+            uri: savedUri,
             date: getCurrentDate(),
-            duration: status.durationMillis ?? elapsedMs,
+            duration: savedDuration,
             title: '',
             harmonySemitones: selectedInterval.semitones,
           })
@@ -133,7 +130,6 @@ function RecordScreen() {
     } catch (err) {
       console.error('Failed to stop recording:', err);
     } finally {
-      setRecording(null);
       recordingActionInFlightRef.current = false;
       setIsProcessing(false);
     }

@@ -22,11 +22,28 @@ jest.mock('react-redux', () => ({
 
 const mockSetAudioModeAsync = jest.fn();
 const mockCreateAsync = jest.fn();
-const mockUsePermissions = jest.fn();
+const mockRequestPermissionsAsync = jest.fn();
+const mockGetPermissionsAsync = jest.fn();
+const mockExpoAudioGetRecordingPermissionsAsync = jest.fn();
+const mockExpoAudioRequestPermissionsAsync = jest.fn();
+const mockExpoAudioSetAudioModeAsync = jest.fn();
+const mockExpoAudioPrepareToRecordAsync = jest.fn();
+const mockExpoAudioRecord = jest.fn();
+const mockExpoAudioStop = jest.fn();
+const mockExpoAudioGetStatus = jest.fn();
+
+const mockExpoAudioRecorder = {
+  prepareToRecordAsync: (...args: unknown[]) => mockExpoAudioPrepareToRecordAsync(...args),
+  record: (...args: unknown[]) => mockExpoAudioRecord(...args),
+  stop: (...args: unknown[]) => mockExpoAudioStop(...args),
+  getStatus: (...args: unknown[]) => mockExpoAudioGetStatus(...args),
+  uri: 'file:///recordings/fallback.wav',
+};
 
 jest.mock('expo-av', () => ({
   Audio: {
-    usePermissions: () => mockUsePermissions(),
+    requestPermissionsAsync: (...args: unknown[]) => mockRequestPermissionsAsync(...args),
+    getPermissionsAsync: (...args: unknown[]) => mockGetPermissionsAsync(...args),
     setAudioModeAsync: (...args: unknown[]) => mockSetAudioModeAsync(...args),
     Recording: {
       createAsync: (...args: unknown[]) => mockCreateAsync(...args),
@@ -42,6 +59,26 @@ jest.mock('expo-av', () => ({
     IOSOutputFormat: {
       LINEARPCM: 'lpcm',
     },
+  },
+}));
+
+jest.mock('expo-audio', () => ({
+  getRecordingPermissionsAsync: (...args: unknown[]) =>
+    mockExpoAudioGetRecordingPermissionsAsync(...args),
+  requestRecordingPermissionsAsync: (...args: unknown[]) => mockExpoAudioRequestPermissionsAsync(...args),
+  setAudioModeAsync: (...args: unknown[]) => mockExpoAudioSetAudioModeAsync(...args),
+  useAudioRecorder: () => mockExpoAudioRecorder,
+  RecordingPresets: {
+    HIGH_QUALITY: {
+      extension: '.m4a',
+      numberOfChannels: 2,
+      ios: {
+        outputFormat: 'aac ',
+      },
+    },
+  },
+  IOSOutputFormat: {
+    LINEARPCM: 'lpcm',
   },
 }));
 
@@ -89,7 +126,15 @@ describe('RecordScreen', () => {
 
     permissionResponse = { status: 'granted' };
     requestPermissionMock = jest.fn().mockResolvedValue(permissionResponse);
-    mockUsePermissions.mockImplementation(() => [permissionResponse, requestPermissionMock]);
+    mockRequestPermissionsAsync.mockImplementation(() => requestPermissionMock());
+    mockGetPermissionsAsync.mockResolvedValue(permissionResponse);
+    mockExpoAudioGetRecordingPermissionsAsync.mockResolvedValue({ granted: true });
+    mockExpoAudioRequestPermissionsAsync.mockResolvedValue({ granted: true });
+    mockExpoAudioSetAudioModeAsync.mockResolvedValue(undefined);
+    mockExpoAudioPrepareToRecordAsync.mockResolvedValue(undefined);
+    mockExpoAudioRecord.mockReturnValue(undefined);
+    mockExpoAudioStop.mockResolvedValue(undefined);
+    mockExpoAudioGetStatus.mockReturnValue({ durationMillis: 2500 });
     mockSetAudioModeAsync.mockResolvedValue(undefined);
     mockCreateAsync.mockResolvedValue({ recording: createMockRecording() });
   });
@@ -137,37 +182,33 @@ describe('RecordScreen', () => {
   });
 
   it('requests permission and does not start recording when permission is denied', async () => {
-    permissionResponse.status = 'denied';
-    requestPermissionMock.mockResolvedValue({ status: 'denied' });
+    mockExpoAudioGetRecordingPermissionsAsync.mockResolvedValue({ granted: false });
+    mockExpoAudioRequestPermissionsAsync.mockResolvedValue({ granted: false });
 
     const screen = render(<RecordScreen />);
     fireEvent.press(screen.getByRole('button', { name: 'Start Recording' }));
 
     await waitFor(() => {
-      expect(requestPermissionMock).toHaveBeenCalledTimes(1);
+      expect(mockExpoAudioRequestPermissionsAsync).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockCreateAsync).not.toHaveBeenCalled();
+    expect(mockExpoAudioPrepareToRecordAsync).not.toHaveBeenCalled();
     expect(mockDispatch).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Start Recording' })).toBeTruthy();
   });
 
   it('starts the timer, dispatches the saved recording payload, and resets on stop', async () => {
-    const mockRecording = createMockRecording();
-    mockCreateAsync.mockResolvedValue({ recording: mockRecording });
-
     const screen = render(<RecordScreen />);
 
     fireEvent.press(screen.getByRole('button', { name: 'Start Recording' }));
 
     await waitFor(() => {
-      expect(mockCreateAsync).toHaveBeenCalledWith(
+      expect(mockExpoAudioPrepareToRecordAsync).toHaveBeenCalledWith(
         expect.objectContaining({
-          android: { extension: '.m4a' },
+          extension: '.wav',
+          numberOfChannels: 1,
           ios: expect.objectContaining({
-            extension: '.wav',
             outputFormat: 'lpcm',
-            numberOfChannels: 1,
             linearPCMBitDepth: 16,
           }),
         })
@@ -183,32 +224,32 @@ describe('RecordScreen', () => {
     fireEvent.press(screen.getByRole('button', { name: 'Stop Recording' }));
 
     await waitFor(() => {
-      expect(mockRecording.stopAndUnloadAsync).toHaveBeenCalledTimes(1);
+      expect(mockExpoAudioStop).toHaveBeenCalledTimes(1);
     });
 
     expect(mockDispatch).toHaveBeenCalledWith(
       addRec({
-        uri: 'file:///recordings/test.m4a',
+        uri: 'file:///recordings/fallback.wav',
         date: 'Aug 8, 2026, 6:38 PM',
         duration: 2500,
         title: '',
         harmonySemitones: 4,
       })
     );
-    expect(mockSetAudioModeAsync).toHaveBeenNthCalledWith(1, {
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
+    expect(mockExpoAudioSetAudioModeAsync).toHaveBeenNthCalledWith(1, {
+      allowsRecording: true,
+      playsInSilentMode: true,
     });
-    expect(mockSetAudioModeAsync).toHaveBeenNthCalledWith(2, {
-      allowsRecordingIOS: false,
+    expect(mockExpoAudioSetAudioModeAsync).toHaveBeenNthCalledWith(2, {
+      allowsRecording: false,
     });
     expect(screen.getByText('0:00')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Start Recording' })).toBeTruthy();
   });
 
   it('ignores rapid repeated taps while recording startup is still in flight', async () => {
-    const startDeferred = deferredPromise<{ recording: MockRecording }>();
-    mockCreateAsync.mockReturnValue(startDeferred.promise);
+    const startDeferred = deferredPromise<void>();
+    mockExpoAudioPrepareToRecordAsync.mockReturnValue(startDeferred.promise);
 
     const screen = render(<RecordScreen />);
     const startButton = screen.getByRole('button', { name: 'Start Recording' });
@@ -217,11 +258,11 @@ describe('RecordScreen', () => {
     fireEvent.press(startButton);
 
     await waitFor(() => {
-      expect(mockCreateAsync).toHaveBeenCalledTimes(1);
+      expect(mockExpoAudioPrepareToRecordAsync).toHaveBeenCalledTimes(1);
     });
 
     await act(async () => {
-      startDeferred.resolve({ recording: createMockRecording() });
+      startDeferred.resolve();
       await startDeferred.promise;
     });
 
@@ -230,10 +271,7 @@ describe('RecordScreen', () => {
 
   it('ignores rapid repeated taps while stopping a recording', async () => {
     const stopDeferred = deferredPromise<void>();
-    const mockRecording = createMockRecording({
-      stopAndUnloadAsync: jest.fn().mockReturnValue(stopDeferred.promise),
-    });
-    mockCreateAsync.mockResolvedValue({ recording: mockRecording });
+    mockExpoAudioStop.mockReturnValue(stopDeferred.promise);
 
     const screen = render(<RecordScreen />);
 
@@ -248,8 +286,7 @@ describe('RecordScreen', () => {
     fireEvent.press(stopButton);
 
     await waitFor(() => {
-      expect(mockRecording.getStatusAsync).toHaveBeenCalledTimes(1);
-      expect(mockRecording.stopAndUnloadAsync).toHaveBeenCalledTimes(1);
+      expect(mockExpoAudioStop).toHaveBeenCalledTimes(1);
     });
 
     await act(async () => {

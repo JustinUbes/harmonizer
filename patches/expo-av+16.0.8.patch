@@ -1,0 +1,597 @@
+diff --git a/node_modules/expo-av/build/ExpoVideoManager.js b/node_modules/expo-av/build/ExpoVideoManager.js
+index ac9172a..de8bd39 100644
+--- a/node_modules/expo-av/build/ExpoVideoManager.js
++++ b/node_modules/expo-av/build/ExpoVideoManager.js
+@@ -1,3 +1,17 @@
+-import { requireNativeModule } from 'expo-modules-core';
+-export default requireNativeModule('ExpoVideoView');
++import { requireOptionalNativeModule } from 'expo-modules-core';
++
++const FALLBACK_VIDEO_MANAGER = {
++	ScaleNone: 'ScaleNone',
++	ScaleToFill: 'ScaleToFill',
++	ScaleAspectFit: 'ScaleAspectFit',
++	ScaleAspectFill: 'ScaleAspectFill',
++	setFullscreen: async () => {
++		throw new Error("expo-av native method 'setFullscreen' is unavailable");
++	},
++};
++
++const resolvedVideoManager =
++	requireOptionalNativeModule('ExpoVideoView') ?? requireOptionalNativeModule('EXVideo') ?? FALLBACK_VIDEO_MANAGER;
++
++export default resolvedVideoManager;
+ //# sourceMappingURL=ExpoVideoManager.js.map
+\ No newline at end of file
+diff --git a/node_modules/expo-av/build/ExponentAV.js b/node_modules/expo-av/build/ExponentAV.js
+index f5ea8b2..8ca776f 100644
+--- a/node_modules/expo-av/build/ExponentAV.js
++++ b/node_modules/expo-av/build/ExponentAV.js
+@@ -1,3 +1,63 @@
+-import { requireNativeModule } from 'expo-modules-core';
+-export default requireNativeModule('ExponentAV');
++import { requireOptionalNativeModule } from 'expo-modules-core';
++import { NativeModules } from 'react-native';
++
++// Expo SDK/Xcode combinations can split AV methods across different native bridges.
++const resolveCandidateModules = () => {
++	const preferredCandidates = [
++		NativeModules.EXAV,
++		NativeModules.ExponentAV,
++		requireOptionalNativeModule('ExponentAV'),
++		requireOptionalNativeModule('ExpoAV'),
++	].filter(Boolean);
++
++	const discoveredCandidates = Object.entries(NativeModules)
++		.filter(([moduleName, moduleValue]) => {
++			if (!moduleValue || typeof moduleValue !== 'object') {
++				return false;
++			}
++			if (/\b(expo|av|audio|video)\b/i.test(moduleName)) {
++				return true;
++			}
++			const moduleKeys = Object.keys(moduleValue);
++			return moduleKeys.includes('prepareAudioRecorder') || moduleKeys.includes('setAudioMode');
++		})
++		.map(([, moduleValue]) => moduleValue);
++
++	return [...preferredCandidates, ...discoveredCandidates];
++};
++
++const resolvePropertyOwner = (property) => {
++	const candidates = resolveCandidateModules();
++	for (const candidate of candidates) {
++		const variants = [
++			candidate,
++			candidate?.default,
++			candidate?.module,
++			candidate?.nativeModule,
++		].filter(Boolean);
++		for (const variant of variants) {
++			if (variant[property] !== undefined) {
++				return variant;
++			}
++		}
++	}
++	return null;
++};
++
++const ExponentAV = new Proxy({}, {
++	get(_target, property) {
++		const moduleCandidate = resolvePropertyOwner(property);
++		if (!moduleCandidate) {
++			return () => Promise.reject(new Error(`expo-av native method '${String(property)}' is unavailable`));
++		}
++
++		const value = moduleCandidate[property];
++		if (typeof value === 'function') {
++			return value.bind(moduleCandidate);
++		}
++		return value;
++	},
++});
++
++export default ExponentAV;
+ //# sourceMappingURL=ExponentAV.js.map
+\ No newline at end of file
+diff --git a/node_modules/expo-av/build/ExponentVideo.js b/node_modules/expo-av/build/ExponentVideo.js
+index d72c1dd..9baba5c 100644
+--- a/node_modules/expo-av/build/ExponentVideo.js
++++ b/node_modules/expo-av/build/ExponentVideo.js
+@@ -1,3 +1,38 @@
+ import { requireNativeViewManager } from 'expo-modules-core';
+-export default requireNativeViewManager('ExpoVideoView');
++import React from 'react';
++import { View } from 'react-native';
++
++let CachedVideoComponent = null;
++
++const resolveVideoComponent = () => {
++	if (CachedVideoComponent) {
++		return CachedVideoComponent;
++	}
++
++	const nativeViewNames = ['ExpoVideoView', 'EXVideo'];
++	for (const nativeViewName of nativeViewNames) {
++		try {
++			CachedVideoComponent = requireNativeViewManager(nativeViewName);
++			return CachedVideoComponent;
++		} catch {
++			// Keep trying fallbacks; some runtimes register only one of these names.
++		}
++	}
++
++	CachedVideoComponent = React.forwardRef((props, ref) => React.createElement(View, {
++		...props,
++		ref,
++	}));
++	return CachedVideoComponent;
++};
++
++const ExponentVideo = React.forwardRef((props, ref) => {
++	const Component = resolveVideoComponent();
++	return React.createElement(Component, {
++		...props,
++		ref,
++	});
++});
++
++export default ExponentVideo;
+ //# sourceMappingURL=ExponentVideo.js.map
+\ No newline at end of file
+diff --git a/node_modules/expo-av/ios/EXAV/EXAV.h b/node_modules/expo-av/ios/EXAV/EXAV.h
+index 42a79e1..82ef03f 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAV.h
++++ b/node_modules/expo-av/ios/EXAV/EXAV.h
+@@ -7,7 +7,12 @@
+ #import <ExpoModulesCore/EXModuleRegistryConsumer.h>
+ #import <ExpoModulesCore/EXAppLifecycleListener.h>
+ #import <ExpoModulesCore/EXExportedModule.h>
++#if __has_include(<ExpoModulesCore/EXEventEmitter.h>)
+ #import <ExpoModulesCore/EXEventEmitter.h>
++#else
++@protocol EXEventEmitter <NSObject>
++@end
++#endif
+ #import <EXAV/EXAVObject.h>
+ 
+ typedef NS_OPTIONS(NSUInteger, EXAudioInterruptionMode)
+diff --git a/node_modules/expo-av/ios/EXAV/EXAV.m b/node_modules/expo-av/ios/EXAV/EXAV.m
+index 7153d28..ddf0a5f 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAV.m
++++ b/node_modules/expo-av/ios/EXAV/EXAV.m
+@@ -3,14 +3,31 @@
+ #import <AVFoundation/AVFoundation.h>
+ 
+ #import <ExpoModulesCore/EXUIManager.h>
++#if __has_include(<ExpoModulesCore/EXEventEmitterService.h>)
+ #import <ExpoModulesCore/EXEventEmitterService.h>
++#else
++@protocol EXEventEmitterService <NSObject>
++- (void)sendEventWithName:(NSString *)name body:(id _Nullable)body;
++@end
++#endif
++
++#if __has_include(<ExpoModulesCore/EXAppLifecycleService.h>)
+ #import <ExpoModulesCore/EXAppLifecycleService.h>
++#else
++@protocol EXAppLifecycleService <NSObject>
++- (void)registerAppLifecycleListener:(id<EXAppLifecycleListener>)listener;
++- (void)unregisterAppLifecycleListener:(id<EXAppLifecycleListener>)listener;
++- (void)setAppStateToBackground;
++- (void)setAppStateToForeground;
++@end
++#endif
+ #import <ExpoModulesCore/EXFileSystemInterface.h>
+ #import <ExpoModulesCore/EXPermissionsInterface.h>
+ #import <ExpoModulesCore/EXPermissionsMethodsDelegate.h>
+ #import <ExpoModulesCore/EXJavaScriptContextProvider.h>
+ 
+ #import <EXAV/EXAV.h>
++#import "EXLegacyCompat.h"
+ #import <EXAV/EXAVPlayerData.h>
+ #import <EXAV/EXVideoView.h>
+ #import <EXAV/EXAudioRecordingPermissionRequester.h>
+@@ -123,7 +140,10 @@ EX_EXPORT_MODULE(ExponentAV);
+ 
+ - (void)installJsiBindings
+ {
+-  id<EXJavaScriptContextProvider> jsContextProvider = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXJavaScriptContextProvider)];
++  id<EXJavaScriptContextProvider> jsContextProvider = nil;
++  if ([_expoModuleRegistry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    jsContextProvider = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXJavaScriptContextProvider)];
++  }
+   void *jsRuntimePtr = [jsContextProvider javaScriptRuntimePointer];
+   if (jsRuntimePtr) {
+     [self installJSIBindingsForRuntime:jsRuntimePtr withSoundDictionary:_soundDictionary];
+@@ -148,15 +168,43 @@ EX_EXPORT_MODULE(ExponentAV);
+ 
+ - (void)setModuleRegistry:(EXModuleRegistry *)expoModuleRegistry
+ {
+-  [[_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXAppLifecycleService)] unregisterAppLifecycleListener:self];
++  id previousRegistry = _expoModuleRegistry;
++  id appLifecycleService = nil;
++  if ([previousRegistry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    appLifecycleService = [previousRegistry getModuleImplementingProtocol:@protocol(EXAppLifecycleService)];
++  }
++  if ([appLifecycleService respondsToSelector:@selector(unregisterAppLifecycleListener:)]) {
++    [appLifecycleService unregisterAppLifecycleListener:self];
++  }
++
+   _expoModuleRegistry = expoModuleRegistry;
+-  _kernelAudioSessionManagerDelegate = [_expoModuleRegistry getSingletonModuleForName:@"AudioSessionManager"];
+-  if (!_isBackgrounded) {
++
++  id registry = _expoModuleRegistry;
++  if ([registry respondsToSelector:@selector(getSingletonModuleForName:)]) {
++    _kernelAudioSessionManagerDelegate = [registry getSingletonModuleForName:@"AudioSessionManager"];
++  } else {
++    _kernelAudioSessionManagerDelegate = nil;
++  }
++
++  if (!_isBackgrounded && [_kernelAudioSessionManagerDelegate respondsToSelector:@selector(moduleDidForeground:)]) {
+     [_kernelAudioSessionManagerDelegate moduleDidForeground:self];
+   }
+-  [[_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXAppLifecycleService)] registerAppLifecycleListener:self];
+-  _permissionsManager = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXPermissionsInterface)];
+-  [EXPermissionsMethodsDelegate registerRequesters:@[[EXAudioRecordingPermissionRequester new]] withPermissionsManager:_permissionsManager];
++
++  appLifecycleService = nil;
++  if ([registry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    appLifecycleService = [registry getModuleImplementingProtocol:@protocol(EXAppLifecycleService)];
++  }
++  if ([appLifecycleService respondsToSelector:@selector(registerAppLifecycleListener:)]) {
++    [appLifecycleService registerAppLifecycleListener:self];
++  }
++
++  _permissionsManager = nil;
++  if ([registry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    _permissionsManager = [registry getModuleImplementingProtocol:@protocol(EXPermissionsInterface)];
++  }
++  if (_permissionsManager != nil) {
++    [EXPermissionsMethodsDelegate registerRequesters:@[[EXAudioRecordingPermissionRequester new]] withPermissionsManager:_permissionsManager];
++  }
+ }
+ 
+ - (void)onAppForegrounded
+@@ -497,7 +545,16 @@ withEXVideoViewForTag:(nonnull NSNumber *)reactTag
+ {
+   // TODO check that the bridge is still valid after the dispatch
+   // TODO check if the queues are ok
+-  [[_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXUIManager)] executeUIBlock:^(id view) {
++  id uiManager = nil;
++  if ([_expoModuleRegistry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    uiManager = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXUIManager)];
++  }
++  if (![uiManager respondsToSelector:@selector(executeUIBlock:forView:ofClass:)]) {
++    reject(@"E_VIDEO_TAGINCORRECT", @"UIManager is unavailable.", nil);
++    return;
++  }
++
++  [uiManager executeUIBlock:^(id view) {
+     if ([view isKindOfClass:[EXVideoView class]]) {
+       block(view);
+     } else if ([[[view subviews] firstObject] isKindOfClass:[EXVideoView class]]) {
+@@ -587,7 +644,10 @@ withEXVideoViewForTag:(nonnull NSNumber *)reactTag
+     return EXErrorWithMessage(@"Recorder is already prepared.");
+   }
+   
+-  id<EXFileSystemInterface> fileSystem = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXFileSystemInterface)];
++  id<EXFileSystemInterface> fileSystem = nil;
++  if ([_expoModuleRegistry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    fileSystem = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXFileSystemInterface)];
++  }
+   
+   if (!fileSystem) {
+     return EXErrorWithMessage(@"No FileSystem module.");
+@@ -751,7 +811,13 @@ EX_EXPORT_METHOD_AS(loadForSound,
+ 
+ - (void)sendEventWithName:(NSString *)eventName body:(NSDictionary *)body
+ {
+-  [[_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXEventEmitterService)] sendEventWithName:eventName body:body];
++  id eventEmitterService = nil;
++  if ([_expoModuleRegistry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    eventEmitterService = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXEventEmitterService)];
++  }
++  if ([eventEmitterService respondsToSelector:@selector(sendEventWithName:body:)]) {
++    [eventEmitterService sendEventWithName:eventName body:body];
++  }
+ }
+ 
+ EX_EXPORT_METHOD_AS(unloadForSound,
+@@ -1013,8 +1079,8 @@ EX_EXPORT_METHOD_AS(unloadAudioRecorder,
+ }
+ 
+ EX_EXPORT_METHOD_AS(getAvailableInputs,
+-                    resolver:(UMPromiseResolveBlock)resolve
+-                    rejecter:(UMPromiseRejectBlock)reject)
++                    resolver:(EXPromiseResolveBlock)resolve
++                    rejecter:(EXPromiseRejectBlock)reject)
+ {
+   NSMutableArray *inputs = [NSMutableArray new];
+   for (AVAudioSessionPortDescription *desc in [_kernelAudioSessionManagerDelegate availableInputs]){
+@@ -1028,8 +1094,8 @@ EX_EXPORT_METHOD_AS(getAvailableInputs,
+ }
+ 
+ EX_EXPORT_METHOD_AS(getCurrentInput,
+-                    getCurrentInput:(UMPromiseResolveBlock)resolve
+-                    rejecter:(UMPromiseRejectBlock)reject)
++                    getCurrentInput:(EXPromiseResolveBlock)resolve
++                    rejecter:(EXPromiseRejectBlock)reject)
+ {
+   AVAudioSessionPortDescription *desc = [_kernelAudioSessionManagerDelegate activeInput];
+   if (desc) {
+@@ -1045,8 +1111,8 @@ EX_EXPORT_METHOD_AS(getCurrentInput,
+ 
+ EX_EXPORT_METHOD_AS(setInput,
+                     setInput:(NSString*)input
+-                    resolver:(UMPromiseResolveBlock)resolve
+-                    rejecter:(UMPromiseRejectBlock)reject)
++                    resolver:(EXPromiseResolveBlock)resolve
++                    rejecter:(EXPromiseRejectBlock)reject)
+ {
+   AVAudioSessionPortDescription* preferredInput = nil;
+   for (AVAudioSessionPortDescription *desc in [_kernelAudioSessionManagerDelegate availableInputs]){
+@@ -1071,8 +1137,17 @@ EX_EXPORT_METHOD_AS(setInput,
+ 
+ - (void)dealloc
+ {
+-  [_kernelAudioSessionManagerDelegate moduleWillDeallocate:self];
+-  [[_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXAppLifecycleService)] unregisterAppLifecycleListener:self];
++  if ([_kernelAudioSessionManagerDelegate respondsToSelector:@selector(moduleWillDeallocate:)]) {
++    [_kernelAudioSessionManagerDelegate moduleWillDeallocate:self];
++  }
++
++  id appLifecycleService = nil;
++  if ([_expoModuleRegistry respondsToSelector:@selector(getModuleImplementingProtocol:)]) {
++    appLifecycleService = [_expoModuleRegistry getModuleImplementingProtocol:@protocol(EXAppLifecycleService)];
++  }
++  if ([appLifecycleService respondsToSelector:@selector(unregisterAppLifecycleListener:)]) {
++    [appLifecycleService unregisterAppLifecycleListener:self];
++  }
+   [[NSNotificationCenter defaultCenter] removeObserver:self];
+   
+   // This will clear all @properties and deactivate the audio session:
+diff --git a/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m b/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m
+index 6f6998d..ecaa39e 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m
++++ b/node_modules/expo-av/ios/EXAV/EXAVPlayerData.m
+@@ -1,6 +1,7 @@
+ // Copyright 2017-present 650 Industries. All rights reserved.
+ 
+ #import <EXAV/EXAVPlayerData.h>
++#import "EXLegacyCompat.h"
+ #import <MobileCoreServices/MobileCoreServices.h>
+ 
+ // This struct is passed between the MTAudioProcessingTap callbacks.
+diff --git a/node_modules/expo-av/ios/EXAV/EXAVTV.m b/node_modules/expo-av/ios/EXAV/EXAVTV.m
+index b6fccda..140043b 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAVTV.m
++++ b/node_modules/expo-av/ios/EXAV/EXAVTV.m
+@@ -12,6 +12,7 @@
+ 
+ #import <EXAV/EXAV.h>
+ #import <EXAV/EXAVPlayerData.h>
++#import "EXLegacyCompat.h"
+ #import <EXAV/EXVideoView.h>
+ #import <EXAV/EXAV+AudioSampleCallback.h>
+ #if __has_include(<EXAV/EXAV-Swift.h>)
+diff --git a/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m b/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m
+index 7d8375a..74686ef 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m
++++ b/node_modules/expo-av/ios/EXAV/EXAudioRecordingPermissionRequester.m
+@@ -1,6 +1,7 @@
+ // Copyright 2016-present 650 Industries. All rights reserved.
+ 
+ #import <EXAV/EXAudioRecordingPermissionRequester.h>
++#import "EXLegacyCompat.h"
+ #import <ExpoModulesCore/EXDefines.h>
+ 
+ #import <AVFoundation/AVFoundation.h>
+@@ -27,7 +28,7 @@ static SEL recordRecordPermissionSelector;
+ 
+   NSString *microphoneUsageDescription = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSMicrophoneUsageDescription"];
+   if (!microphoneUsageDescription) {
+-    EXFatal(EXErrorWithMessage(@"This app is missing NSMicrophoneUsageDescription, so audio services will fail. Add one of these keys to your bundle's Info.plist."));
++    NSLog(@"[expo-av] Missing NSMicrophoneUsageDescription; audio services will fail until this key is present in Info.plist.");
+     systemStatus = AVAudioSessionRecordPermissionDenied;
+   } else {
+     systemStatus = [[AVAudioSession sharedInstance] recordPermission];
+diff --git a/node_modules/expo-av/ios/EXAV/EXLegacyCompat.h b/node_modules/expo-av/ios/EXAV/EXLegacyCompat.h
+new file mode 100644
+index 0000000..b92b490
+--- /dev/null
++++ b/node_modules/expo-av/ios/EXAV/EXLegacyCompat.h
+@@ -0,0 +1,27 @@
++// Compatibility helpers for legacy expo-av sources built against newer ExpoModulesCore.
++
++#import <Foundation/Foundation.h>
++
++NS_ASSUME_NONNULL_BEGIN
++
++static inline NSError *EXErrorWithMessage(NSString *message) {
++  return [NSError errorWithDomain:@"expo.av" code:0 userInfo:@{NSLocalizedDescriptionKey: message ?: @"Unknown error"}];
++}
++
++#ifndef EXLogWarn
++#define EXLogWarn(...) NSLog(__VA_ARGS__)
++#endif
++
++#ifndef EXLogError
++#define EXLogError(...) NSLog(__VA_ARGS__)
++#endif
++
++#ifndef EXLogInfo
++#define EXLogInfo(...) NSLog(__VA_ARGS__)
++#endif
++
++#ifndef EXFatal
++#define EXFatal(error) NSLog(@"[expo-av] Fatal error: %@", (error))
++#endif
++
++NS_ASSUME_NONNULL_END
+diff --git a/node_modules/expo-av/ios/EXAV/Video/EXVideoView.h b/node_modules/expo-av/ios/EXAV/Video/EXVideoView.h
+index f7ff4ee..91480b4 100644
+--- a/node_modules/expo-av/ios/EXAV/Video/EXVideoView.h
++++ b/node_modules/expo-av/ios/EXAV/Video/EXVideoView.h
+@@ -1,7 +1,15 @@
+ // Copyright 2015-present 650 Industries. All rights reserved.
+ 
+ #import <ExpoModulesCore/EXModuleRegistry.h>
++#if __has_include(<ExpoModulesCore/EXLegacyExpoViewProtocol.h>)
+ #import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>
++#else
++@protocol EXLegacyExpoViewProtocol <NSObject>
++@optional
+++ (NSString *)moduleName;
++- (void)setOnLayout:(id)onLayout;
++@end
++#endif
+ 
+ #import <EXAV/EXAVObject.h>
+ #import <EXAV/EXVideoPlayerViewControllerDelegate.h>
+diff --git a/node_modules/expo-av/ios/EXAV/Video/VideoViewModule.swift b/node_modules/expo-av/ios/EXAV/Video/VideoViewModule.swift
+index 4ddc324..9f8cd0d 100644
+--- a/node_modules/expo-av/ios/EXAV/Video/VideoViewModule.swift
++++ b/node_modules/expo-av/ios/EXAV/Video/VideoViewModule.swift
+@@ -14,7 +14,7 @@ public final class VideoViewModule: Module {
+ 
+     AsyncFunction("setFullscreen") { (viewTag: Int, value: Bool, promise: Promise) in
+       self.runBlockForView(viewTag) { view in
+-        view.contentView.setFullscreen(value, resolver: promise.resolver, rejecter: promise.legacyRejecter)
++        view.contentView.setFullscreen(value, resolver: promise.legacyResolver, rejecter: promise.legacyRejecter)
+       }
+     }
+ 
+diff --git a/node_modules/expo-av/src/ExpoVideoManager.ts b/node_modules/expo-av/src/ExpoVideoManager.ts
+index 8a642d5..0f76818 100644
+--- a/node_modules/expo-av/src/ExpoVideoManager.ts
++++ b/node_modules/expo-av/src/ExpoVideoManager.ts
+@@ -1,3 +1,17 @@
+-import { requireNativeModule } from 'expo-modules-core';
++import { requireOptionalNativeModule } from 'expo-modules-core';
+ 
+-export default requireNativeModule('ExpoVideoView');
++const FALLBACK_VIDEO_MANAGER = {
++	ScaleNone: 'ScaleNone',
++	ScaleToFill: 'ScaleToFill',
++	ScaleAspectFit: 'ScaleAspectFit',
++	ScaleAspectFill: 'ScaleAspectFill',
++	setFullscreen: async () => {
++		throw new Error("expo-av native method 'setFullscreen' is unavailable");
++	},
++};
++
++export default (
++	requireOptionalNativeModule('ExpoVideoView') ??
++	requireOptionalNativeModule('EXVideo') ??
++	FALLBACK_VIDEO_MANAGER
++);
+diff --git a/node_modules/expo-av/src/ExponentAV.ts b/node_modules/expo-av/src/ExponentAV.ts
+index cc06ed4..3e5c400 100644
+--- a/node_modules/expo-av/src/ExponentAV.ts
++++ b/node_modules/expo-av/src/ExponentAV.ts
+@@ -1,3 +1,64 @@
+-import { requireNativeModule } from 'expo-modules-core';
++import { requireOptionalNativeModule } from 'expo-modules-core';
++import { NativeModules } from 'react-native';
+ 
+-export default requireNativeModule('ExponentAV');
++type NativeAVModule = Record<string, unknown>;
++
++const resolveCandidateModules = () => {
++	const preferredCandidates = [
++		NativeModules.EXAV as NativeAVModule | undefined,
++		NativeModules.ExponentAV as NativeAVModule | undefined,
++		requireOptionalNativeModule('ExponentAV') as NativeAVModule | null,
++		requireOptionalNativeModule('ExpoAV') as NativeAVModule | null,
++	].filter(Boolean) as NativeAVModule[];
++
++	const discoveredCandidates = Object.entries(NativeModules)
++		.filter(([moduleName, moduleValue]) => {
++			if (!moduleValue || typeof moduleValue !== 'object') {
++				return false;
++			}
++			if (/\b(expo|av|audio|video)\b/i.test(moduleName)) {
++				return true;
++			}
++			const moduleKeys = Object.keys(moduleValue as NativeAVModule);
++			return moduleKeys.includes('prepareAudioRecorder') || moduleKeys.includes('setAudioMode');
++		})
++		.map(([, moduleValue]) => moduleValue as NativeAVModule);
++
++	return [...preferredCandidates, ...discoveredCandidates];
++};
++
++const resolvePropertyOwner = (property: string | symbol) => {
++	const candidates = resolveCandidateModules();
++	for (const candidate of candidates) {
++		const variants = [
++			candidate,
++			candidate.default as NativeAVModule | undefined,
++			candidate.module as NativeAVModule | undefined,
++			candidate.nativeModule as NativeAVModule | undefined,
++		].filter(Boolean) as NativeAVModule[];
++
++		for (const variant of variants) {
++			if (variant[property as keyof NativeAVModule] !== undefined) {
++				return variant;
++			}
++		}
++	}
++	return null;
++};
++
++const ExponentAV: NativeAVModule = new Proxy({}, {
++	get(_target, property: string | symbol) {
++		const owner = resolvePropertyOwner(property);
++		if (!owner) {
++			return () => Promise.reject(new Error(`expo-av native method '${String(property)}' is unavailable`));
++		}
++
++		const value = owner[property as keyof NativeAVModule];
++		if (typeof value === 'function') {
++			return (value as (...args: unknown[]) => unknown).bind(owner);
++		}
++		return value;
++	},
++});
++
++export default ExponentAV;
+diff --git a/node_modules/expo-av/src/ExponentVideo.tsx b/node_modules/expo-av/src/ExponentVideo.tsx
+index 3055524..c6b028f 100644
+--- a/node_modules/expo-av/src/ExponentVideo.tsx
++++ b/node_modules/expo-av/src/ExponentVideo.tsx
+@@ -1,3 +1,31 @@
+ import { requireNativeViewManager } from 'expo-modules-core';
++import React from 'react';
++import { View } from 'react-native';
+ 
+-export default requireNativeViewManager('ExpoVideoView');
++let CachedVideoComponent: React.ComponentType<any> | null = null;
++
++const resolveVideoComponent = () => {
++	if (CachedVideoComponent) {
++		return CachedVideoComponent;
++	}
++
++	const nativeViewNames = ['ExpoVideoView', 'EXVideo'];
++	for (const nativeViewName of nativeViewNames) {
++		try {
++			CachedVideoComponent = requireNativeViewManager(nativeViewName);
++			return CachedVideoComponent;
++		} catch {
++			// Keep trying fallbacks; some runtimes register only one of these names.
++		}
++	}
++
++	CachedVideoComponent = React.forwardRef((props, ref) => <View {...props} ref={ref} />);
++	return CachedVideoComponent;
++};
++
++const ExponentVideo = React.forwardRef<any, any>((props, ref) => {
++	const Component = resolveVideoComponent();
++	return <Component {...props} ref={ref} />;
++});
++
++export default ExponentVideo;
