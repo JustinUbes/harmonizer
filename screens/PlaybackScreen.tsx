@@ -143,7 +143,11 @@ function createExpoAudioController(
       if (isReleased) return;
       isReleased = true;
       // remove() only drops the JS reference; pause first so the old source can't keep playing.
-      player.pause();
+      try {
+        player.pause();
+      } catch (err) {
+        console.warn('Error pausing audio player before release:', err);
+      }
       pendingLoadWaits.forEach((finish) => finish());
       subscription.remove();
       player.remove();
