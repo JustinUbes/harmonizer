@@ -19,3 +19,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Correct time formatting and current-date formatting helpers
 - Fix playback state tracking, delete handling, and the drawer header title styling
+- Make seeking and scrubbing reliable: playback starts exactly from the seeker, the position follows the thumb while dragging, audio pauses during a drag and resumes from the release point, and play/pause stays responsive around seeks
+- Delete recordings with the expo-file-system `File` API so audio files (and cached harmony renders) are actually removed
