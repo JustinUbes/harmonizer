@@ -1,0 +1,37 @@
+# Smoke test: record a short take through the emulator's virtual microphone
+# and confirm it shows up in the Playback history.
+#
+# Run it with `npm run e2e:android` so the committed mic fixture
+# (tests/fixtures/mic-input-a4.wav) is playing into the emulator's mic.
+appId: com.justinubes.harmonizer
+name: Record -> history smoke test
+---
+- launchApp:
+    clearState: true
+    permissions:
+      microphone: allow
+# Generous timeout: a debug build may still be downloading its JS bundle from Metro.
+- extendedWaitUntil:
+    visible: Start Recording
+    timeout: 120000
+- tapOn: Start Recording
+- extendedWaitUntil:
+    visible: Stop Recording
+    timeout: 15000
+- extendedWaitUntil:
+    visible: '0:03'
+    timeout: 15000
+- tapOn: Stop Recording
+- extendedWaitUntil:
+    visible: Start Recording
+    timeout: 15000
+- tapOn: Open menu
+- tapOn: Playback
+- extendedWaitUntil:
+    visible: Delete recording
+    timeout: 10000
+- assertNotVisible: 'No recordings yet.*'
+- assertVisible: Play
+- assertVisible: Share recording
+# The entry's duration label proves real audio was captured, not an empty take.
+- assertVisible: '0:0[3-9]'
