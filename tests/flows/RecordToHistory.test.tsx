@@ -42,7 +42,14 @@ jest.mock('expo-av', () => ({
       createAsync: (...args: unknown[]) => mockCreateAsync(...args),
     },
     RecordingOptionsPresets: {
-      HIGH_QUALITY: 'HIGH_QUALITY',
+      HIGH_QUALITY: {
+        android: { extension: '.m4a' },
+        ios: { extension: '.m4a', outputFormat: 'aac ' },
+        web: {},
+      },
+    },
+    IOSOutputFormat: {
+      LINEARPCM: 'lpcm',
     },
     Sound: jest.fn().mockImplementation(() => ({
       getStatusAsync: jest.fn().mockResolvedValue({ isLoaded: false }),
@@ -155,7 +162,11 @@ describe('Record -> save -> history flow', () => {
         expect(screen.getByRole('button', { name: 'Stop Recording' })).toBeTruthy();
       });
       expect(requestPermissionMock).not.toHaveBeenCalled();
-      expect(mockCreateAsync).toHaveBeenCalledWith('HIGH_QUALITY');
+      expect(mockCreateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ios: expect.objectContaining({ extension: '.wav', outputFormat: 'lpcm' }),
+        })
+      );
     });
 
     it('leaves the audio session and history untouched when permission is denied', async () => {
@@ -204,6 +215,7 @@ describe('Record -> save -> history flow', () => {
         date: 'Aug 8, 2026, 6:38 PM',
         duration: 2500,
         title: '',
+        harmonySemitones: 4,
       },
     ]);
     expect(screen.queryByText(/No recordings yet/)).toBeNull();
@@ -240,6 +252,7 @@ describe('Record -> save -> history flow', () => {
       date: 'Aug 8, 2026, 6:38 PM',
       duration: 4000,
       title: '',
+      harmonySemitones: 4,
     });
   });
 

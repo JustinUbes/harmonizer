@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add a Maestro E2E smoke flow (`npm run e2e:android`) that records from a fixture-fed emulator mic and verifies the new history entry
 
 ### Changed
-- Upgrade the project to Expo SDK 54 and refresh the native dependency set
+- Upgrade the project to Expo SDK 57 and refresh the native dependency set
 - Modernize the recording and playback flows with typed Redux state, playback seeking, and confirmation prompts
 - Update app metadata, Babel config, and EAS config for the current Expo toolchain
 

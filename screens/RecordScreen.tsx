@@ -13,14 +13,25 @@ import styles from '../styles';
 import AppButton from '../components/AppButton';
 import { formatTime } from '../utils/FormatTime';
 
+const IOS_LINEAR_PCM_FORMAT = (Audio as unknown as { IOSOutputFormat?: { LINEARPCM?: string } })
+  .IOSOutputFormat?.LINEARPCM;
+
+const HIGH_QUALITY_PRESET: Audio.RecordingOptions =
+  typeof Audio.RecordingOptionsPresets.HIGH_QUALITY === 'object' &&
+  Audio.RecordingOptionsPresets.HIGH_QUALITY !== null
+    ? (Audio.RecordingOptionsPresets.HIGH_QUALITY as Audio.RecordingOptions)
+    : ({} as Audio.RecordingOptions);
+
+const HIGH_QUALITY_IOS_PRESET = HIGH_QUALITY_PRESET.ios ?? {};
+
 // iOS records 16-bit PCM WAV so harmonies can be rendered on-device.
 // Android's MediaRecorder cannot produce PCM, so it keeps the AAC preset.
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
-  ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+  ...HIGH_QUALITY_PRESET,
   ios: {
-    ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+    ...HIGH_QUALITY_IOS_PRESET,
     extension: '.wav',
-    outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+    outputFormat: IOS_LINEAR_PCM_FORMAT ?? HIGH_QUALITY_IOS_PRESET.outputFormat,
     numberOfChannels: 1,
     linearPCMBitDepth: 16,
     linearPCMIsBigEndian: false,
