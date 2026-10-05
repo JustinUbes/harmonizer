@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import RecordScreen from '../../screens/RecordScreen';
 import { addRec } from '../../store/redux/recordings';
+import { HARMONY_INTERVALS } from '../../utils/HarmonyIntervals';
 
 jest.mock('expo-haptics', () => ({
   impactAsync: jest.fn(),
@@ -98,6 +99,41 @@ describe('RecordScreen', () => {
       jest.clearAllTimers();
     });
     jest.useRealTimers();
+  });
+
+  it('renders every harmony interval with Major 3rd selected by default', () => {
+    const screen = render(<RecordScreen />);
+
+    HARMONY_INTERVALS.forEach(({ label }) => {
+      expect(screen.getByRole('radio', { name: label })).toBeTruthy();
+    });
+    expect(screen.getByRole('radio', { name: 'Major 3rd' })).toBeSelected();
+    expect(screen.getByRole('radio', { name: 'Minor 3rd' })).not.toBeSelected();
+  });
+
+  it('updates the selected harmony interval when another interval is pressed', () => {
+    const screen = render(<RecordScreen />);
+
+    fireEvent.press(screen.getByRole('radio', { name: 'Perfect 5th' }));
+
+    expect(screen.getByRole('radio', { name: 'Perfect 5th' })).toBeSelected();
+    expect(screen.getByRole('radio', { name: 'Major 3rd' })).not.toBeSelected();
+  });
+
+  it('disables harmony interval selection while recording', async () => {
+    const screen = render(<RecordScreen />);
+
+    fireEvent.press(screen.getByRole('button', { name: 'Start Recording' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop Recording' })).toBeTruthy();
+    });
+
+    HARMONY_INTERVALS.forEach(({ label }) => {
+      expect(screen.getByRole('radio', { name: label })).toBeDisabled();
+    });
+    fireEvent.press(screen.getByRole('radio', { name: 'Octave' }));
+    expect(screen.getByRole('radio', { name: 'Major 3rd' })).toBeSelected();
   });
 
   it('requests permission and does not start recording when permission is denied', async () => {
