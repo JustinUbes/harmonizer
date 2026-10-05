@@ -15,6 +15,7 @@ import { deleteRecordingFiles, resolvePlaybackUri } from '../utils/HarmonyFiles'
 
 const PROGRESS_UPDATE_INTERVAL_MS = 100;
 const EXACT_SEEK = { toleranceMillisBefore: 0, toleranceMillisAfter: 0 };
+const PLAYER_LOAD_TIMEOUT_MS = 5000;
 
 interface LoadedSound {
   sound: PlaybackController;
@@ -88,8 +89,31 @@ function createExpoAudioController(
     } as AVPlaybackStatus);
   });
 
+  let isReleased = false;
+  const pendingLoadWaits = new Set<() => void>();
+
+  // Seeking before the source is ready is ignored natively, which would restart playback from 0.
+  function waitUntilLoaded(): Promise<void> {
+    if (player.isLoaded || isReleased) return Promise.resolve();
+    return new Promise((resolve) => {
+      const loadSubscription = player.addListener('playbackStatusUpdate', (status) => {
+        if (status.isLoaded) finish();
+      });
+      const timeout = setTimeout(finish, PLAYER_LOAD_TIMEOUT_MS);
+      pendingLoadWaits.add(finish);
+      function finish() {
+        clearTimeout(timeout);
+        loadSubscription.remove();
+        pendingLoadWaits.delete(finish);
+        resolve();
+      }
+    });
+  }
+
   return {
     async playFromPositionAsync(positionMillis, seek) {
+      await waitUntilLoaded();
+      if (isReleased) return toPlaybackStatus(player);
       await player.seekTo(
         positionMillis / 1000,
         seek.toleranceMillisBefore,
@@ -103,6 +127,8 @@ function createExpoAudioController(
       return toPlaybackStatus(player);
     },
     async setPositionAsync(positionMillis, seek) {
+      await waitUntilLoaded();
+      if (isReleased) return toPlaybackStatus(player);
       await player.seekTo(
         positionMillis / 1000,
         seek.toleranceMillisBefore,
@@ -114,6 +140,11 @@ function createExpoAudioController(
       return toPlaybackStatus(player);
     },
     async unloadAsync() {
+      if (isReleased) return;
+      isReleased = true;
+      // remove() only drops the JS reference; pause first so the old source can't keep playing.
+      player.pause();
+      pendingLoadWaits.forEach((finish) => finish());
       subscription.remove();
       player.remove();
     },
@@ -253,9 +284,12 @@ function PlaybackScreen() {
   }
 
   async function startPlayback(recording: Recording) {
+    if (!wantsPlaybackRef.current || isScrubbingRef.current) return;
+    if (activeUriRef.current !== recording.uri) return;
+    // Loading and seeking to the cued position count as a seek, so early status from a
+    // freshly loaded source (still at 0) can't snap the seeker back to the start.
+    pendingSeeksRef.current += 1;
     try {
-      if (!wantsPlaybackRef.current || isScrubbingRef.current) return;
-      if (activeUriRef.current !== recording.uri) return;
       const sound = await ensureLoaded(recording);
       if (!sound || !wantsPlaybackRef.current || isScrubbingRef.current) return;
       const status = await sound.getStatusAsync();
@@ -264,6 +298,8 @@ function PlaybackScreen() {
     } catch (err) {
       console.error('Error playing audio:', err);
       updatePlaying(false);
+    } finally {
+      pendingSeeksRef.current -= 1;
     }
   }
 
@@ -352,7 +388,9 @@ function PlaybackScreen() {
     enqueue(async () => {
       const loaded = loadedRef.current;
       if (!loaded || loaded.mode === modeRef.current) return;
-      const status = await loaded.sound.getStatusAsync();
+      // Stop the current source before swapping so the old and new modes never overlap,
+      // then resume the new mode from where the old one stopped.
+      const status = await loaded.sound.pauseAsync();
       if (status.isLoaded && canAcceptStatusPosition()) {
         updatePosition(status.positionMillis);
       }
