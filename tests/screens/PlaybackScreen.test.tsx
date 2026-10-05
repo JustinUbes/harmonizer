@@ -317,14 +317,22 @@ describe('PlaybackScreen', () => {
     expect(mockResolvePlaybackUri).toHaveBeenLastCalledWith(melodyRecording, 'mix');
 
     const mixSound = latestSound();
-    mixSound.getStatusAsync.mockResolvedValue({ isLoaded: true, isPlaying: true, positionMillis: 4000 });
+    mixSound.pauseAsync.mockResolvedValue({ isLoaded: true, isPlaying: false, positionMillis: 4000 });
     fireEvent.press(screen.getByRole('radio', { name: 'Harmony Only' }));
 
     await waitFor(() => expect(sounds).toHaveLength(2));
     await waitFor(() => {
       expect(latestSound().playFromPositionAsync).toHaveBeenCalledWith(4000, EXACT_SEEK);
     });
+    // The old mode is stopped before it is unloaded and before the new mode starts.
+    expect(mixSound.pauseAsync).toHaveBeenCalledTimes(1);
     expect(mixSound.unloadAsync).toHaveBeenCalled();
+    expect(mixSound.pauseAsync.mock.invocationCallOrder[0]).toBeLessThan(
+      mixSound.unloadAsync.mock.invocationCallOrder[0]
+    );
+    expect(mixSound.unloadAsync.mock.invocationCallOrder[0]).toBeLessThan(
+      latestSound().playFromPositionAsync.mock.invocationCallOrder[0]
+    );
     expect(mockResolvePlaybackUri).toHaveBeenLastCalledWith(melodyRecording, 'harmony');
     expect(mockCreateAsync).toHaveBeenLastCalledWith(
       { uri: `${melodyRecording.uri}#harmony` },
@@ -338,6 +346,139 @@ describe('PlaybackScreen', () => {
     });
     expect(screen.getByText('0:04')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+  });
+
+  it('switches from melody to melody + harmony mid-playback without restarting or overlapping audio', async () => {
+    const screen = render(<PlaybackScreen />);
+    fireEvent.press(screen.getByRole('radio', { name: 'Melody' }));
+    fireEvent.press(screen.getByRole('button', { name: 'Play' }));
+    await waitFor(() => expect(latestSound().playFromPositionAsync).toHaveBeenCalledTimes(1));
+    expect(mockResolvePlaybackUri).toHaveBeenLastCalledWith(melodyRecording, 'melody');
+
+    emitStatus({ positionMillis: 6200 });
+    const melodySound = latestSound();
+    melodySound.pauseAsync.mockResolvedValue({ isLoaded: true, isPlaying: false, positionMillis: 6250 });
+    fireEvent.press(screen.getByRole('radio', { name: 'Melody + Harmony' }));
+
+    await waitFor(() => expect(sounds).toHaveLength(2));
+    await waitFor(() => {
+      expect(latestSound().playFromPositionAsync).toHaveBeenCalledWith(6250, EXACT_SEEK);
+    });
+    expect(melodySound.pauseAsync).toHaveBeenCalledTimes(1);
+    expect(melodySound.unloadAsync).toHaveBeenCalledTimes(1);
+    expect(melodySound.playFromPositionAsync).toHaveBeenCalledTimes(1);
+    expect(latestSound().playFromPositionAsync).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('0:06')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+  });
+
+  it('switches modes at the paused position without starting playback', async () => {
+    const screen = render(<PlaybackScreen />);
+    fireEvent.press(screen.getByRole('button', { name: 'Play' }));
+    await waitFor(() => expect(latestSound().playFromPositionAsync).toHaveBeenCalledTimes(1));
+    latestSound().pauseAsync.mockResolvedValue({ isLoaded: true, positionMillis: 3000 });
+    fireEvent.press(screen.getByRole('button', { name: 'Pause' }));
+    await waitFor(() => expect(latestSound().pauseAsync).toHaveBeenCalledTimes(1));
+
+    fireEvent.press(screen.getByRole('radio', { name: 'Melody' }));
+    await waitFor(() => expect(latestSound().unloadAsync).toHaveBeenCalled());
+    expect(sounds).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy();
+
+    fireEvent.press(screen.getByRole('button', { name: 'Play' }));
+    await waitFor(() => expect(sounds).toHaveLength(2));
+    await waitFor(() => {
+      expect(latestSound().playFromPositionAsync).toHaveBeenCalledWith(3000, EXACT_SEEK);
+    });
+    expect(mockResolvePlaybackUri).toHaveBeenLastCalledWith(melodyRecording, 'melody');
+  });
+
+  it('stops the expo-audio fallback player and resumes the new mode once it has loaded', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockCreateAsync.mockRejectedValue(new Error('Cannot call expo-av native method loadForSound'));
+    interface MockPlayer {
+      isLoaded: boolean;
+      playing: boolean;
+      currentTime: number;
+      duration: number;
+      listeners: Set<(status: Record<string, unknown>) => void>;
+      addListener: jest.Mock;
+      seekTo: jest.Mock;
+      play: jest.Mock;
+      pause: jest.Mock;
+      remove: jest.Mock;
+      emit: (status: Record<string, unknown>) => void;
+    }
+    const players: MockPlayer[] = [];
+    mockCreateAudioPlayer.mockImplementation(() => {
+      const player: MockPlayer = {
+        isLoaded: false,
+        playing: false,
+        currentTime: 0,
+        duration: 10,
+        listeners: new Set(),
+        addListener: jest.fn((_event: string, listener: (status: Record<string, unknown>) => void) => {
+          player.listeners.add(listener);
+          return { remove: () => player.listeners.delete(listener) };
+        }),
+        seekTo: jest.fn(async (seconds: number) => {
+          player.currentTime = seconds;
+        }),
+        play: jest.fn(() => {
+          player.playing = true;
+        }),
+        pause: jest.fn(() => {
+          player.playing = false;
+        }),
+        remove: jest.fn(),
+        emit: (status) => {
+          Object.assign(player, status);
+          const fullStatus = {
+            isLoaded: player.isLoaded,
+            playing: player.playing,
+            currentTime: player.currentTime,
+            duration: player.duration,
+          };
+          Array.from(player.listeners).forEach((listener) => listener(fullStatus));
+        },
+      };
+      players.push(player);
+      return player;
+    });
+
+    const screen = render(<PlaybackScreen />);
+    fireEvent.press(screen.getByRole('button', { name: 'Play' }));
+    await waitFor(() => expect(players).toHaveLength(1));
+    // Seeking must wait until the native source is ready.
+    expect(players[0].seekTo).not.toHaveBeenCalled();
+    act(() => {
+      players[0].emit({ isLoaded: true });
+    });
+    await waitFor(() => expect(players[0].play).toHaveBeenCalledTimes(1));
+    act(() => {
+      players[0].emit({ isLoaded: true, playing: true, currentTime: 5 });
+    });
+
+    fireEvent.press(screen.getByRole('radio', { name: 'Melody' }));
+    await waitFor(() => expect(players).toHaveLength(2));
+    expect(players[0].pause).toHaveBeenCalled();
+    expect(players[0].playing).toBe(false);
+    expect(players[0].remove).toHaveBeenCalledTimes(1);
+    expect(players[0].pause.mock.invocationCallOrder[0]).toBeLessThan(
+      players[0].remove.mock.invocationCallOrder[0]
+    );
+    expect(players[1].seekTo).not.toHaveBeenCalled();
+    expect(players[1].play).not.toHaveBeenCalled();
+
+    act(() => {
+      players[1].emit({ isLoaded: true });
+    });
+    await waitFor(() => expect(players[1].play).toHaveBeenCalledTimes(1));
+    expect(players[1].seekTo).toHaveBeenCalledWith(5, 0, 0);
+    expect(players[1].seekTo.mock.invocationCallOrder[0]).toBeLessThan(
+      players[1].play.mock.invocationCallOrder[0]
+    );
+    expect(screen.getByText('0:05')).toBeTruthy();
   });
 
   it('explains when a recording cannot be harmonized and still plays the melody', async () => {
